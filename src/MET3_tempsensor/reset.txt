@@ -1,0 +1,1 @@
+The chiller issued the following alarm code: ALARM:  5  Reset option (CODE 4) was not available.  Check out immediately!

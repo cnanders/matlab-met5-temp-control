@@ -1,0 +1,18 @@
+function toggleHeatMode
+
+global coolMode;
+global heatMode;
+global coastMode;
+
+s=get(gcbo,'Value');
+if (s)
+   coolMode=0;
+   heatMode=1;
+   coastMode=0;
+   h=findobj(gcbf,'Tag','cb_cool');
+   set(h,'Value',0);
+   h=findobj(gcbf,'Tag','cb_coast');
+   set(h,'Value',0);
+else
+   heatMode=0;
+end;
