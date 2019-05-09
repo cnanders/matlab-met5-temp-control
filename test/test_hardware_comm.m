@@ -1,22 +1,9 @@
 
-%% Add vendor dependencies to path
+%% Add src and mpm dependencies to path
 
 [cDirThis, ~, ~] = fileparts(mfilename('fullpath'));
-cDirVendor = fullfile(cDirThis, '..', 'vendor');
-
-addpath(genpath(fullfile(...
-    cDirVendor, ...
-    'github', ...
-    'awojdyla', ...
-    'matlab-datatranslation-measurpoint', ...
-    'src')));
-
-addpath(genpath(fullfile(...
-    cDirVendor, ...
-    'github', ...
-    'cnanders', ...
-    'matlab-atec302', ...
-    'src')));
+addpath(genpath(fullfile(cDirThis, '..', 'src')));
+addpath(genpath(fullfile(cDirThis, '..', 'mpm-packages')));
 
 
 %% Initiate a MesaurPoint client
@@ -35,10 +22,10 @@ mp.idn();
 mp.enable();
 
 %% Configure all channels for scan list (internal fast scan with circular memory buffer)
-mp.configureScanListAll()
+% mp.configureScanListAll()
 
 %% Start scan
-mp.initiateScan();
+% mp.initiateScan();
 
 %% Read all values from the scan buffer
 results = mp.getScanData()
