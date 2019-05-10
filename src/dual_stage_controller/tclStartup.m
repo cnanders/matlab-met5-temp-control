@@ -13,6 +13,7 @@ global tempReadTimer    % handle to the temperature reading timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
 global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 global currentTemp      % stucture holding vector with the current temperature values for all physical channels and the averaging index
+global mp               % variable to hold the measrue point object
 
 %% Make sure that we only allow one instance of control loop to run
 if ~isempty(findobj(csgHandle,'Name','CONTROL PANEL'))
@@ -21,11 +22,29 @@ if ~isempty(findobj(csgHandle,'Name','CONTROL PANEL'))
     return;
 end;
 
+%% Create MesaurPoint client
+[cDirThis, ~, ~] = fileparts(mfilename('fullpath'));
+addpath(genpath(fullfile(cDirThis, '..', '..', 'mpm-packages')));
+
+%% Initiate a MesaurPoint client
+cIP = '192.168.20.27';
+mp = datatranslation.MeasurPoint(cIP);
+
+%% Connect the instrument through TCP/IP
+mp.connect();
+
+%% Ask the instument its id using SCPI standard queries
+mp.idn();
+
+%% Enable readout on protected channels
+mp.enable();
+
+
 %% set the default values for the temperature reading structure
 currentTemp.avgCnt=0;  % current averaging counter
-%currentTemp.avg=1200;  % number of readings to average (rolling)
+currentTemp.avg=300;  % number of readings to average (rolling)
 currentTemp.avg=10;  % just for debugging
-currentTemp.Nchan=23;  % number of channels, include both real and 3 virtual channels (optic avg, chiller avg, subframe avg)
+currentTemp.Nchan=55;  % number of channels, include both real and 3 virtual channels (optic avg, chiller avg, subframe avg)
 currentTemp.buffer=zeros(currentTemp.Nchan,currentTemp.avg);
 currentTemp.avgTemps=zeros(currentTemp.Nchan,1);
 
@@ -122,15 +141,15 @@ set(h,'String',num2str(0,'%4.2f'));
 
 %% Load in some historic temperature data just for debugging
 % this code should be removed before deploying
-global tempdatabase
-tempdatabase=csvread('templog.csv');
+%global tempdatabase
+%tempdatabase=csvread('templog.csv');
 
 %% setup the recurring temperature reading timer
-% dont forget to change the timer delay from 0.9 back to 0.1 seconds, this is for debug mode
-tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','FixedRate','Period', 0.9, 'TimerFcn', 'tempReadTimerCallback'); 
+% dont forget to change the timer delay from 0.9 back to 0.5 seconds, this is for debug mode
+tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','FixedRate','Period', 0.5, 'TimerFcn', 'tempReadTimerCallback'); 
 start(tempReadTimer);
 
 %% setup the recurring control timer
 % dont forget to change the timer delay time multiplier from 6 back to 60, this is for debug mode
-tempSensorTimer = timer('Name', 'tempSensorTimer', 'ExecutionMode','FixedRate','Period', controlParams.T*0.6, 'TimerFcn', 'tempSensorTimerCallback'); 
+tempSensorTimer = timer('Name', 'tempSensorTimer', 'ExecutionMode','FixedRate','Period', controlParams.T*60, 'TimerFcn', 'tempSensorTimerCallback'); 
 start(tempSensorTimer);

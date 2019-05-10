@@ -7,7 +7,9 @@ global tempReadTimer    % handle to the temperature reading timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
 global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 global currentTemp      % stucture holding vector with the current temperature values for all physical channels and the averaging index
+global mp
 
+mp.disconnect();
 stop(tempSensorTimer);
 stop(tempReadTimer);
 delete(tempSensorTimer);
