@@ -5,9 +5,13 @@
 
 function dataOut = readChillers()
 
-%% dummy code, this will be replaced with Chris' read function
-global controlParams
+global ATEC302
+global virtualMode      % global variable that allow system to be put into virtual mode (no hardware connection)
 
-dataOut=ones(1,4)*controlParams.setPoint+randn(1,4).*0.5;
-
-% end of dummy code
+if virtualMode
+    dataOut = ones(1,4)*controlParams.setPoint+randn(1,4).*0.5;
+else
+    for i=1:4
+        dataOut(i)=ATEC302(i).comm.getTemperature();
+    end;
+end;

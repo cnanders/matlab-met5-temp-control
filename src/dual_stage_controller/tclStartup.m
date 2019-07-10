@@ -13,7 +13,12 @@ global tempReadTimer    % handle to the temperature reading timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
 global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 global currentTemp      % stucture holding vector with the current temperature values for all physical channels and the averaging index
-global mp               % variable to hold the measrue point object
+global measurePoint     % variable to hold the measure point object
+global ATEC302          % variable to hold the atec objects
+global virtualMode      % global variable that allow system to be put into virtual mode (no hardware connection)
+
+%% allow system to be put into virtual mode (no hardware connection)
+virtualMode=0;
 
 %% Make sure that we only allow one instance of control loop to run
 if ~isempty(findobj(csgHandle,'Name','CONTROL PANEL'))
@@ -22,28 +27,89 @@ if ~isempty(findobj(csgHandle,'Name','CONTROL PANEL'))
     return;
 end;
 
-%% Create MesaurPoint client
-[cDirThis, ~, ~] = fileparts(mfilename('fullpath'));
-addpath(genpath(fullfile(cDirThis, '..', '..', 'mpm-packages')));
+%% add temp controller working foder to path
+addpath(pwd);
 
-%% Initiate a MesaurPoint client
-cIP = '192.168.20.27';
-mp = datatranslation.MeasurPoint(cIP);
+if ~virtualMode      % enable hardware if no in vitrual mode 
+    %% Create MesaurPoint client
+    [cDirThis, ~, ~] = fileparts(mfilename('fullpath'));
+    addpath(genpath(fullfile(cDirThis, '..', '..', 'mpm-packages')));
 
-%% Connect the instrument through TCP/IP
-mp.connect();
+    % Initiate a MesaurPoint client
+    cIP = '192.168.20.27';
+    measurePoint = datatranslation.MeasurPoint(cIP);
+    measurePoint.connect(); % Connect the instrument through TCP/IP
+    measurePoint.idn(); % Ask the instument its id using SCPI standard queries
+    measurePoint.enable(); % Enable readout on protected channels
+    
+     % Show all MeasurePoint channel hardware types (These cannot be set)
+    [tc, rtd, volt] = measurePoint.channelType();
+    fprintf('bl12014.Logger.init():\n');
+    fprintf('DataTranslation MeasurPoint Hardware configuration:\n');
+    fprintf('TC   sensor channels = %s\n',num2str(tc,'%1.0f '))
+    fprintf('RTD  sensor channels = %s\n',num2str(rtd,'%1.0f '))
+    fprintf('Volt sensor channels = %s\n',num2str(volt,'%1.0f '))
 
-%% Ask the instument its id using SCPI standard queries
-mp.idn();
+    % Configure MeasurePoint to know what hardware we have connected
+    % to each channel
+    channels = 0 : 7;
+    for n = channels
+       measurePoint.setSensorType(n, 'J');
+    end
 
-%% Enable readout on protected channels
-mp.enable();
+    channels = 8 : 15;
+    for n = channels
+        measurePoint.setSensorType(n, 'PT1000');
+    end
 
+    channels = 16 : 19;
+    for n = channels
+        measurePoint.setSensorType(n, 'PT100');
+    end
+
+    channels = 20 : 23;
+    for n = channels
+       measurePoint.setSensorType(n, 'PT1000');
+    end
+
+    channels = 24 : 31;
+    for n = channels
+        measurePoint.setSensorType(n, 'PT100');
+    end
+
+    channels = 32 : 47;
+    for n = channels
+        measurePoint.setSensorType(n, 'V');
+    end
+
+    % Set up continuous population of internal memory buffer
+    measurePoint.setScanList(0:47);
+    measurePoint.setScanPeriod(0.1);
+    measurePoint.initiateScan();
+    % measurePoint.abortScan();
+    measurePoint.clearBytesAvailable();
+
+    %% Create ATEC302 instance for each controller
+    % 1, 2, 3, 4 correspond to FTC1,2,3,4 as shown on the chassis
+    % (left to right)
+    cHost = '192.168.20.36';
+
+    ATEC302(1).comm = atec.ATEC302('u16Port', 4001,'cHost', cHost);
+    ATEC302(1).comm.init();
+
+    ATEC302(2).comm = atec.ATEC302('u16Port', 4002,'cHost', cHost);
+    ATEC302(2).comm.init();
+
+    ATEC302(3).comm = atec.ATEC302('u16Port', 4003,'cHost', cHost);
+    ATEC302(3).comm.init();
+
+    ATEC302(4).comm = atec.ATEC302('u16Port', 4004,'cHost', cHost);
+    ATEC302(4).comm.init();
+end;
 
 %% set the default values for the temperature reading structure
 currentTemp.avgCnt=0;  % current averaging counter
 currentTemp.avg=300;  % number of readings to average (rolling)
-currentTemp.avg=10;  % just for debugging
 currentTemp.Nchan=55;  % number of channels, include both real and 3 virtual channels (optic avg, chiller avg, subframe avg)
 currentTemp.buffer=zeros(currentTemp.Nchan,currentTemp.avg);
 currentTemp.avgTemps=zeros(currentTemp.Nchan,1);
@@ -99,7 +165,8 @@ csgHandle=openfig('CoolStateGUI.fig','reuse');
 %tpHandle=SensorPlot;
 
 % initialize ErrorPlot
-epHandle=figure('Name','CONTROL ERROR PANEL','NumberTitle','off','CloseRequestFcn','tclShutdown');
+epHandle=openfig('CoolStatePlots.fig','reuse');
+%epHandle=figure('Name','CONTROL ERROR PANEL','NumberTitle','off','CloseRequestFcn','tclShutdown');
 
 % initialize the control panel
 h=findobj(csgHandle,'Tag','ed_T');
@@ -145,8 +212,7 @@ set(h,'String',num2str(0,'%4.2f'));
 %tempdatabase=csvread('templog.csv');
 
 %% setup the recurring temperature reading timer
-% dont forget to change the timer delay from 0.9 back to 0.5 seconds, this is for debug mode
-tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','FixedRate','Period', 0.5, 'TimerFcn', 'tempReadTimerCallback'); 
+tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','FixedRate','Period', 1, 'TimerFcn', 'tempReadTimerCallback'); 
 start(tempReadTimer);
 
 %% setup the recurring control timer

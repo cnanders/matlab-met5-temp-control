@@ -4,16 +4,23 @@ function tempSensorTimerCallback
 
 %% global vars
 global csgHandle    % handle to the control planel figure
+global tempReadTimer
 global tempSensorTimer  % handle to the control loop timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
 global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 global currentTemp      % stucture holding vector with the current temperature values for all physical channels and the averaging index
 
 try
+    %% ensure that the tempReadTimer is still running
+    % I have this here because I have observed the timer being shut off for not reason
+    if ~isempty(tempReadTimer)
+        if ~strcmp(get(tempReadTimer,'running'),'on')
+            start(tempReadTimer);
+        end;
+    end;
+    
     %% call function to read all the temperatures
     tempSensorData = getTemps(tempSensorData,currentTemp);
-    % dummy code that assumes that the chill plates achieved target temp since last cycle 
-    tempSensorData.temps(2,tempSensorData.currentIdx)=controlParams.setPoint;
 
     %% maybe add code to plot all the temps here
 
@@ -25,8 +32,8 @@ try
     controlParams = tempControlLoop(tempSensorData,controlParams);
 
     %% call function set the chill plate temps
-    %%fprintf('Setting the chill plate temps to %3.2f\n',controlParams.setPoint);
-    % add actual code
+    %disp(sprintf('Setting chillplate setpoints to %3.1f',controlParams.setPoint));
+    setChillers(controlParams.setPoint);
 
     %% save all data and parameters to disk
     save controlParamsSave.mat controlParams

@@ -5,23 +5,11 @@
 
 function dataOut = readTemps(numChan)
 
-%% dummy code, this will be replaced with Chris' read function
-% global tempdatabase
-% persistent readCnt
-% 
-% if isempty(readCnt)
-%     readCnt=1;
-% else
-%     readCnt=readCnt+1;
-% end;
-% if readCnt>length(tempdatabase)
-%     readCnt=1;
-% end;
-% 
-% dataOut=tempdatabase(readCnt,1:numChan);
+global measurePoint
+global virtualMode      % global variable that allow system to be put into virtual mode (no hardware connection)
 
-% end of dummy code
-
-%%
-global mp
-dataOut = mp.getScanData();
+if virtualMode
+    dataOut = randn(1,48)+22.5;
+else
+    dataOut = measurePoint.getScanData();
+end;

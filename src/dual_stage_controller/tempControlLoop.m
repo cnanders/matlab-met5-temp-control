@@ -32,7 +32,7 @@
 function controlParams = tempControlLoop(data,controlParams)
 
 global csgHandle;
-global epHandle;
+global tempSensorTimer;
 
 %% error checking
 controlParams = checkControlParams(controlParams);
@@ -78,7 +78,7 @@ controlParams.chillplateHist(controlParams.currentIdx)=data.temps(2,data.current
 controlParams.subframeHist(controlParams.currentIdx)=data.temps(3,data.currentIdx);
 
 % determine the subframe control temp error
-sfTempError=data.temps(3,data.currentIdx)-controlParams.adp_Kpr;
+sfTempError=data.temps(3,data.currentIdx)-controlParams.subframeSetPoint;
 
 % add subframe temp error to control loop history
 controlParams.sfTempErrorHist(controlParams.currentIdx)=sfTempError;
@@ -105,14 +105,7 @@ if(controlParams.controlMode==0)  % coast mode
     fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
 	fclose(fid);
     
-	figure(epHandle);
-    bs=historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx);
-    t=plotdom(-controlParams.Nbuf*controlParams.T/60,0,controlParams.Nbuf);
-	plot(t,bs,t,bs*0+0.01,'r',t,bs*0-0.01,'r');
-    title('COAST MODE');
-    grid;
-    xlabel('hours');
-    ylabel('Control temperature error');
+    updateTempPlots();
     return;
 end;
     
@@ -136,14 +129,7 @@ if (controlParams.controlMode==2)
         fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
         fclose(fid);
 
-        figure(epHandle);
-        bs=historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx);
-        t=plotdom(-controlParams.Nbuf*controlParams.T/60,0,controlParams.Nbuf);
-        plot(t,bs,t,bs*0+0.01,'r',t,bs*0-0.01,'r');
-        title('COOL MODE');
-        grid;
-        xlabel('hours');
-        ylabel('Control temperature error');
+        updateTempPlots();
         controlParams.setPoint=controlParams.minSetPoint;
         return;
     else
@@ -177,14 +163,7 @@ if (controlParams.controlMode==3)
         fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
         fclose(fid);
 
-        figure(epHandle);
-        bs=historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx);
-        t=plotdom(-controlParams.Nbuf*controlParams.T/60,0,controlParams.Nbuf);
-        plot(t,bs,t,bs*0+0.01,'r',t,bs*0-0.01,'r');
-        title('HEAT MODE');
-        grid;
-        xlabel('hours');
-        ylabel('Control temperature error');
+        updateTempPlots();
         controlParams.setPoint=controlParams.maxSetPoint;
         return;
     else
@@ -206,6 +185,12 @@ if tempError>0.1
     controlParams.Kp=10;
     controlParams.Ki=0;
 end;
+if sfTempError>0.1
+    KpsfMem=controlParams.Kpsf;
+    KisfMem=controlParams.Kisf;
+    controlParams.Kpsf=10;
+    controlParams.Kisf=0;
+end;
 
 %% increase the control loop index counter
 controlParams.loopPassCnt=controlParams.loopPassCnt+1;  
@@ -221,12 +206,13 @@ if (idx_derivative<=0)
 end;
 % assuming we have been running for at least as long as the target
 % derivative delay, compute the temperature error derivative
-if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T)
+if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T) & get(tempSensorTimer,'TasksExecuted')>ceil(controlParams.KdT/controlParams.T)
     tempDeriv=controlParams.tempErrorHist(idx_derivative)-controlParams.tempErrorHist(controlParams.currentIdx);
 else
     tempDeriv=0;
 end;
-if (abs(tempDeriv)>0.1) tempDeriv=0; end; % disable Kd under temp spike conditions
+bs=get(tempSensorTimer,'TasksExecuted');
+if (abs(tempDeriv)>0.05) tempDeriv=0; end; % disable Kd under temp spike conditions
 
 controlParams.tempDerivHist(controlParams.currentIdx)=tempDeriv;
 
@@ -250,15 +236,20 @@ controlParams.subframeSetPoint=adp_Kpr-KiBoost-controlParams.Kp*tempError+tempDe
 
 %% NOW ENTER SECOND LEVEL CONTROL WHERE WE SET THE CHILLER BASED ON THE NEW SUBFRAME TARGET
 %% determine derivative
-% use idx_derivative determined above
-% assuming we have been running for at least as long as the target
-% derivative delay, compute the temperature error derivative
-if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T)
-    sfTempDeriv=controlParams.sfTempErrorHist(idx_derivative)-controlParams.sfTempErrorHist(controlParams.currentIdx);
+% convert the derivative time difference to index and error check the result
+idx_derivative=data.currentIdx-ceil(controlParams.KdT/controlParams.T); 
+if (idx_derivative<=0)
+    idx_derivative=data.Nbuf-idx_derivative;
+end;
+if (idx_derivative<=0)
+    idx_derivative=1;
+end;
+if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T) & get(tempSensorTimer,'TasksExecuted')>ceil(controlParams.KdT/controlParams.T)
+    sfTempDeriv=data.temps(3,idx_derivative)-data.temps(3,data.currentIdx);
 else
     sfTempDeriv=0;
 end;
-if (abs(sfTempDeriv)>0.1) sfTempDeriv=0; end; % disable Kd under temp spike conditions
+if (abs(sfTempDeriv)>0.05) sfTempDeriv=0; end; % disable Kd under temp spike conditions
 controlParams.sfTempDerivHist(controlParams.currentIdx)=sfTempDeriv;
 
 %% Determine integral term
@@ -278,11 +269,17 @@ controlParams.adp_Kprsf=adp_Kprsf;
 %% determine the target instantaneous chillplate temperature
 % applies Kp, Kd, and Ki corrections to the steady state chillplate temp target determined above
 controlParams.setPoint=adp_Kprsf-KisfBoost-controlParams.Kpsf*sfTempError+sfTempDeriv*controlParams.Kdsf; % combined Kp Ki Kp method
+if (controlParams.setPoint<controlParams.minSetPoint)
+    controlParams.setPoint=controlParams.minSetPoint;
+end;
+if (controlParams.setPoint>controlParams.maxSetPoint)
+    controlParams.setPoint=controlParams.maxSetPoint;
+end;
 controlParams.setPointHist(controlParams.currentIdx)=controlParams.setPoint;
 
 %% display status in control window
 fprintf('%s ',datestr(now));
-fprintf('Goal=%3.1f  Temp=%4.3f  Subframe=%3.1f  SubframeAdpRef=%4.2f  Chiller=%3.1f  ChillerAdpRef=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf);
+fprintf('PO Goal=%3.1f  PO Temp=%4.3f  Subframe Goal=%3.1f  Subfram Temp=%3.1f  SubframeAdpRef=%4.2f  Chiller=%3.1f  ChillerAdpRef=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.subframeHist(controlParams.currentIdx),controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf);
 
 %% Send "I'm Alive" email
 % 	global aliveCounter;
@@ -315,7 +312,7 @@ h=findobj(csgHandle,'Tag','ed_adp_Kprsf');
 set(h,'String',num2str(adp_Kprsf,'%4.2f'));
 
 h=findobj(csgHandle,'Tag','st_sf_setpoint');
-set(h,'String',num2str(controlParams.subframeSetPoint,'%3.1f'));
+set(h,'String',num2str(controlParams.subframeSetPoint,'%3.2f'));
 h=findobj(csgHandle,'Tag','st_cp_setpoint');
 set(h,'String',num2str(controlParams.setPoint,'%3.1f'));
 
@@ -344,33 +341,17 @@ set(h,'String',num2str(-KisfBoost,'%4.2f'));
 h=findobj(csgHandle,'Tag','st_kdsfg');
 set(h,'String',num2str(sfTempDeriv*controlParams.Kdsf,'%4.2f'));
 
-figure(epHandle);
-bs=historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx);
-t=plotdom(-controlParams.Nbuf*controlParams.T/60,0,controlParams.Nbuf);
-subplot(3,1,1);
-plot(t,bs,t,bs*0+0.01,'r',t,bs*0-0.01,'r');
-grid;
-xlabel('hours');
-ylabel('Control Temperature Error');
-subplot(3,1,2);
-bs=historyUnwrap(controlParams.chillplateHist,controlParams.currentIdx);
-plot(t,bs);
-grid;
-xlabel('hours');
-ylabel('Chill Plate Temp');
-subplot(3,1,3);
-bs=historyUnwrap(controlParams.subframeHist,controlParams.currentIdx);
-plot(t,bs);
-grid;
-xlabel('hours');
-ylabel('Subframe Temp');
+updateTempPlots();
 
 %% reset adaptive Kp and Ki section
 if tempError>0.1
     controlParams.Kp=KpMem;
     controlParams.Ki=KiMem;
 end;
-
+if sfTempError>0.1
+    controlParams.Kpsf=KpsfMem;
+    controlParams.Kisf=KisfMem;
+end;
 %% send trouble email if problem has been detected
 % global troubleEmailSent;
 % if (controlParams.setPoint<15)
