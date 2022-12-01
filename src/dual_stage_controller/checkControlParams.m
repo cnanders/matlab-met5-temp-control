@@ -18,13 +18,14 @@ if isempty(controlParams.controlChannel)
 end
 
 if ~isfield(controlParams,'minSetPoint')
-    controlParams.minSetPoint=10;
+    controlParams.minSetPoint=8;
 end
 if isempty(controlParams.minSetPoint)
-    controlParams.minSetPoint=10;
+    controlParams.minSetPoint=8;
 end
-if controlParams.minSetPoint<10 | controlParams.minSetPoint>28
-    controlParams.minSetPoint=10;
+
+if controlParams.minSetPoint<8 | controlParams.minSetPoint>28
+    controlParams.minSetPoint=8;
 end
 
 if ~isfield(controlParams,'maxSetPoint')
@@ -123,7 +124,7 @@ end
 if isempty(controlParams.KdT)
     controlParams.KdT=60;
 end
-if controlParams.KdT<controlParams.T | controlParams.KdT>180
+if controlParams.KdT<controlParams.T | controlParams.KdT>600
     controlParams.KdT=60;
 end
 
@@ -160,7 +161,7 @@ end
 if isempty(controlParams.controlMode)
     controlParams.controlMode=1;
 end
-if controlParams.controlMode<0 | controlParams.controlMode>3
+if controlParams.controlMode<0 | controlParams.controlMode>4
     controlParams.controlMode=1;
 end
 

@@ -2,7 +2,7 @@ function GUI_set_K
 
 global controlParams
 global csgHandle
-global tempSensorTimer
+global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 
 s=get(gcbo,'String');
 v=str2num(s);
@@ -12,9 +12,9 @@ t=get(gcbo,'Tag');
 switch (t)
 case 'ed_set_target'
     if isempty(v)
-        set(gcbo,'String',num2str(controlParams.tempGoal,'%4.2f'));
+        set(gcbo,'String',num2str(controlParams.tempGoal,'%4.3f'));
     else
-        set(gcbo,'String',num2str(v,'%4.2f'));
+        set(gcbo,'String',num2str(v,'%4.3f'));
         controlParams.tempGoal=v;
     end; 
 case 'ed_kp'
@@ -82,6 +82,8 @@ case 'ed_T'
 end;
 
 %% call the control loop
-tempSensorTimerCallback;
+controlParams = tempControlLoop(tempSensorData,controlParams,1); % do not add to control error history
+setChillers(controlParams.setPoint);
+
 
 

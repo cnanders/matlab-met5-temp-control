@@ -28,21 +28,25 @@
 %     chillplateHist: history of the chillplate temp
 %     tempErrorHist: history of the temperature error
 %     tempDerivHist: history of the temperature error derivate
+%
+% bypassHist: flag to disable adding of data to the history vectors
 
-function controlParams = tempControlLoop(data,controlParams)
+function controlParams = tempControlLoop(data,controlParams,bypassHist)
 
 global csgHandle;
 global tempSensorTimer;
 
 %% error checking
 controlParams = checkControlParams(controlParams);
-
+if nargin<3
+    bypassHist=0;
+end;
 % end of parameter error checking
 
 %% extract the current temperature for the target controlled channel
 currentTemp=data.temps(controlParams.controlChannel,data.currentIdx);
   
-%% Make sure we are in reasonable optic temp bounds before entering the control loop
+%% Make sure we are in reasonable optic temp bounds and that we do not have an active measurepoint error before entering the control loop
 if (currentTemp<15) 
     fprintf('Not updating chiller on this cycle because OPTIC temp is < 15 C. Something must be wrong \n');
     fprintf('tempControlLoop.m: Optic temperature is %1.2f.\n', currentTemp);
@@ -56,34 +60,30 @@ end
 %====================================================================================
 
 %% update the control loop index count
-controlParams.currentIdx=controlParams.currentIdx+1;
-if controlParams.currentIdx>controlParams.Nbuf
-    controlParams.currentIdx=1;
+previousIdx=controlParams.currentIdx;
+if ~bypassHist
+    controlParams.currentIdx=controlParams.currentIdx+1;
+    if controlParams.currentIdx>controlParams.Nbuf
+        controlParams.currentIdx=1;
+    end;
 end;
 
 %% get current control temp, chillplate temp, and temp error
 % determine the control temp error
 tempError=currentTemp-controlParams.tempGoal;
 
-% add temp error to control loop history
-controlParams.tempErrorHist(controlParams.currentIdx)=tempError;
-if (abs(controlParams.tempErrorHist(controlParams.currentIdx))>1) 
-    controlParams.tempErrorHist(controlParams.currentIdx)=1*sign(controlParams.tempErrorHist(controlParams.currentIdx)); 
-end;
+if ~bypassHist
+    % add temp error to control loop history
+    controlParams.tempErrorHist(controlParams.currentIdx)=tempError;
+    if (abs(controlParams.tempErrorHist(controlParams.currentIdx))>1) 
+        controlParams.tempErrorHist(controlParams.currentIdx)=1*sign(controlParams.tempErrorHist(controlParams.currentIdx)); 
+    end;
 
-% get current chillplate temp (channel #2) and add to control loop history
-controlParams.chillplateHist(controlParams.currentIdx)=data.temps(2,data.currentIdx);
+    % get current chillplate temp (channel #2) and add to control loop history
+    controlParams.chillplateHist(controlParams.currentIdx)=data.temps(2,data.currentIdx);
 
-% get current subframe temp (channel #3) and add to control loop history
-controlParams.subframeHist(controlParams.currentIdx)=data.temps(3,data.currentIdx);
-
-% determine the subframe control temp error
-sfTempError=data.temps(3,data.currentIdx)-controlParams.subframeSetPoint;
-
-% add subframe temp error to control loop history
-controlParams.sfTempErrorHist(controlParams.currentIdx)=sfTempError;
-if (abs(controlParams.sfTempErrorHist(controlParams.currentIdx))>1) 
-    controlParams.sfTempErrorHist(controlParams.currentIdx)=1*sign(controlParams.sfTempErrorHist(controlParams.currentIdx)); 
+    % get current subframe temp (channel #3) and add to control loop history
+    controlParams.subframeHist(controlParams.currentIdx)=data.temps(3,data.currentIdx);
 end;
 
 %% coast mode
@@ -92,23 +92,56 @@ if(controlParams.controlMode==0)  % coast mode
     set(h,'Value',0);
     h=findobj(csgHandle,'Tag','cb_heat');
     set(h,'Value',0);
+    h=findobj(csgHandle,'Tag','cb_vent');
+    set(h,'Value',0);
     h=findobj(csgHandle,'Tag','cb_coast');
     set(h,'Value',1);
     fprintf('%s ',datestr(now));
-    fprintf('Coast: Goal=%3.1f  Temp=%4.3f  Chiller=%3.1f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint);
+    fprintf('Coast: Goal=%4.3f  Temp=%4.3f  Chiller=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint);
 	% log file
 	fid=fopen('log.txt','at');
 	fprintf(fid,'%s,',datestr(now));
 	for i=1:10
         % write the individual channel temps
 	end
-    fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
+    fprintf(fid,'%4.2f,%4.3f,%4.2f,%4.2f,%4.2f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
 	fclose(fid);
     
-    updateTempPlots();
     return;
 end;
+
+%% vent mode
+if(controlParams.controlMode==4)  % vent mode
+    h=findobj(csgHandle,'Tag','cb_cool');
+    set(h,'Value',0);
+    h=findobj(csgHandle,'Tag','cb_heat');
+    set(h,'Value',0);
+    h=findobj(csgHandle,'Tag','cb_vent');
+    set(h,'Value',1);
+    h=findobj(csgHandle,'Tag','cb_coast');
+    set(h,'Value',0);
     
+    tempError=tempError-0.3; % effectively set the temp goal to 0.3 warmer while in vent mode
+
+    
+%     % force the chillers to match the room air temp
+%     controlParams.setPoint=data.temps(9,data.currentIdx);
+%     
+%     fprintf('%s ',datestr(now));
+%     fprintf('Vent: Goal=%4.3f  Temp=%4.3f  Chiller=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint);
+% 	% log file
+% 	fid=fopen('log.txt','at');
+% 	fprintf(fid,'%s,',datestr(now));
+% 	for i=1:10
+%         % write the individual channel temps
+% 	end
+%     fprintf(fid,'%4.2f,%4.3f,%4.2f,%4.2f,%4.2f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
+% 	fclose(fid);
+%     
+%     return;
+end;
+
+
 %% cool mode
 if (controlParams.controlMode==2)
     h=findobj(csgHandle,'Tag','cb_cool');
@@ -116,6 +149,8 @@ if (controlParams.controlMode==2)
     h=findobj(csgHandle,'Tag','cb_heat');
     set(h,'Value',0);
     h=findobj(csgHandle,'Tag','cb_coast');
+    set(h,'Value',0);
+    h=findobj(csgHandle,'Tag','cb_vent');
     set(h,'Value',0);
     if (tempError>0.05) 
         fprintf('%s ',datestr(now));
@@ -126,19 +161,21 @@ if (controlParams.controlMode==2)
         for i=1:10
             % write the individual channel temps
         end
-        fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
+        fprintf(fid,'%4.3f,%4.3f,%4.2f,%4.2f,%4.2f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
         fclose(fid);
 
-        updateTempPlots();
         controlParams.setPoint=controlParams.minSetPoint;
         return;
     else
+        fprintf('Temp=%4.2f, Cooling mode automatically turned off because we are close to target\n',currentTemp);
         controlParams.controlMode=1;
         h=findobj(csgHandle,'Tag','cb_cool');
         set(h,'Value',0);
         h=findobj(csgHandle,'Tag','cb_heat');
         set(h,'Value',0);
         h=findobj(csgHandle,'Tag','cb_coast');
+        set(h,'Value',0);
+        h=findobj(csgHandle,'Tag','cb_vent');
         set(h,'Value',0);
     end;
 end;
@@ -151,28 +188,32 @@ if (controlParams.controlMode==3)
     set(h,'Value',1);
     h=findobj(csgHandle,'Tag','cb_coast');
     set(h,'Value',0);    
+    h=findobj(csgHandle,'Tag','cb_vent');
+    set(h,'Value',0);
     if (tempError<-0.05) 
         fprintf('%s ',datestr(now));
-        fprintf('Temp=%4.2f, Cooling mode, closed loop disabled, chiller set to min\n',currentTemp);
+        fprintf('Temp=%4.2f, Heat mode, closed loop disabled, chiller set to max\n',currentTemp);
         % log file
         fid=fopen('log.txt','at');
         fprintf(fid,'%s,',datestr(now));
         for i=1:10
             % write the individual channel temps
         end
-        fprintf(fid,'%3.1f,%4.3f,%4.2f,%4.2f,%3.1f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
+        fprintf(fid,'%4.3f,%4.3f,%4.2f,%4.2f,4.2f,%4.2f,%4.3f,%4.3f\n',controlParams.tempGoal,currentTemp,controlParams.setPoint,controlParams.adp_Kpr,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.T);
         fclose(fid);
 
-        updateTempPlots();
         controlParams.setPoint=controlParams.maxSetPoint;
         return;
     else
+        fprintf('Temp=%4.2f, Heating mode automatically turned off because we are close to target\n',currentTemp);
         controlParams.controlMode=1;
         h=findobj(csgHandle,'Tag','cb_cool');
         set(h,'Value',0);
         h=findobj(csgHandle,'Tag','cb_heat');
         set(h,'Value',0);
         h=findobj(csgHandle,'Tag','cb_coast');
+        set(h,'Value',0);
+        h=findobj(csgHandle,'Tag','cb_vent');
         set(h,'Value',0);
     end;
 end;
@@ -181,19 +222,17 @@ end;
 % if temperature error is large turn off Ki and set Kp to 10
 if tempError>0.1
     KpMem=controlParams.Kp;
+    KdMem=controlParams.Kd;
     KiMem=controlParams.Ki;
-    controlParams.Kp=10;
+    controlParams.Kp=50;
+    controlParams.Kd=0;
     controlParams.Ki=0;
-end;
-if sfTempError>0.1
-    KpsfMem=controlParams.Kpsf;
-    KisfMem=controlParams.Kisf;
-    controlParams.Kpsf=10;
-    controlParams.Kisf=0;
 end;
 
 %% increase the control loop index counter
-controlParams.loopPassCnt=controlParams.loopPassCnt+1;  
+if ~bypassHist
+    controlParams.loopPassCnt=controlParams.loopPassCnt+1;  
+end;
 
 %% determine derivative
 % convert the derivative time difference to index and error check the result
@@ -206,15 +245,33 @@ if (idx_derivative<=0)
 end;
 % assuming we have been running for at least as long as the target
 % derivative delay, compute the temperature error derivative
-if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T) & get(tempSensorTimer,'TasksExecuted')>ceil(controlParams.KdT/controlParams.T)
-    tempDeriv=controlParams.tempErrorHist(idx_derivative)-controlParams.tempErrorHist(controlParams.currentIdx);
+minCycles=ceil(controlParams.KdT/controlParams.T);
+%minCycles=2;
+if controlParams.loopPassCnt>minCycles & get(tempSensorTimer,'TasksExecuted')>minCycles
+    tempTrend=controlParams.tempErrorHist(idx_derivative:controlParams.currentIdx);
+    try
+        warning off;
+        tempTrend_fit=linfit(tempTrend);
+        wanring on;
+    catch
+        tempTrend_fit=tempTrend;
+    end;
+    try
+        tempDeriv=tempTrend_fit(1)-tempTrend_fit(end);
+    catch
+        tempDeriv=0;
+        disp('Error caught at tempControlLoop line 258, setting tempDeriv to 0');
+    end
 else
     tempDeriv=0;
 end;
-bs=get(tempSensorTimer,'TasksExecuted');
-if (abs(tempDeriv)>0.05) tempDeriv=0; end; % disable Kd under temp spike conditions
 
-controlParams.tempDerivHist(controlParams.currentIdx)=tempDeriv;
+%bs=get(tempSensorTimer,'TasksExecuted');
+if (abs(tempDeriv)>0.15) tempDeriv=0; end; % disable Kd under temp spike conditions
+
+if ~bypassHist
+    controlParams.tempDerivHist(controlParams.currentIdx)=tempDeriv;
+end;
 
 %% Determine integral term
 bs=historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx);
@@ -224,7 +281,11 @@ if (abs(KiBoost)>3) KiBoost=3*sign(KiBoost); end;
 %% determine the target steady state subframe temperature (adaptive subframe temp)
 % weight set by (1-error)^2 with exponential decay as a function of past time
 bs=flipline(historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx));
-w_factor=(max(1-abs(bs*10),0).^2).*((1-abs(bs*10)).^2).*(exp((-([0:controlParams.Nbuf-1]))/600)); % ignore points where optic error is too large
+bs2=flipline(historyUnwrap(controlParams.tempDerivHist,controlParams.currentIdx));
+% ignore points where optic error or derivative is too large
+%     if error greater than 0.1 degrees, ignore
+%     if slope is greater 0.01 degrees in 10 hours, ignore
+w_factor=(max(1-abs(bs*20),0).^2).*(max(1-abs(bs2*100),0).^2).*((1-abs(bs*10)).^2).*(exp((-([0:controlParams.Nbuf-1]))/1200)); 
 
 bs=flipline(historyUnwrap(controlParams.subframeHist,controlParams.currentIdx));
 adp_Kpr=sum(bs.*w_factor)./sum(w_factor);
@@ -233,8 +294,32 @@ controlParams.adp_Kpr=adp_Kpr;
 %% determine the target instantaneous subframe temperature
 % applies Kp, Kd, and Ki corrections to the steady state chillplate temp target determined above
 controlParams.subframeSetPoint=adp_Kpr-KiBoost-controlParams.Kp*tempError+tempDeriv*controlParams.Kd; % combined Kp Ki Kp method
+%
 
 %% NOW ENTER SECOND LEVEL CONTROL WHERE WE SET THE CHILLER BASED ON THE NEW SUBFRAME TARGET
+%
+%
+% determine the subframe control temp error
+sfTempError=data.temps(3,data.currentIdx)-controlParams.subframeSetPoint;
+
+% add subframe temp error to control loop history
+controlParams.sfTempErrorHist(controlParams.currentIdx)=sfTempError;
+if (abs(controlParams.sfTempErrorHist(controlParams.currentIdx))>1) 
+    controlParams.sfTempErrorHist(controlParams.currentIdx)=1*sign(controlParams.sfTempErrorHist(controlParams.currentIdx)); 
+end;
+
+% adaptive Kp and Ki section
+% if temperature error is large turn off Ki and set Kp to 10
+if sfTempError>0.1
+    KpsfMem=controlParams.Kpsf;
+    KdsfMem=controlParams.Kdsf;
+    KisfMem=controlParams.Kisf;
+    controlParams.Kpsf=50;
+    controlParams.Kdsf=0;
+    controlParams.Kisf=0;
+end;
+
+
 %% determine derivative
 % convert the derivative time difference to index and error check the result
 idx_derivative=data.currentIdx-ceil(controlParams.KdT/controlParams.T); 
@@ -249,8 +334,11 @@ if controlParams.loopPassCnt>ceil(controlParams.KdT/controlParams.T) & get(tempS
 else
     sfTempDeriv=0;
 end;
-if (abs(sfTempDeriv)>0.05) sfTempDeriv=0; end; % disable Kd under temp spike conditions
-controlParams.sfTempDerivHist(controlParams.currentIdx)=sfTempDeriv;
+if (abs(sfTempDeriv)>0.15) sfTempDeriv=0; end; % disable Kd under temp spike conditions
+
+if ~bypassHist
+    controlParams.sfTempDerivHist(controlParams.currentIdx)=sfTempDeriv;
+end;
 
 %% Determine integral term
 bs=historyUnwrap(controlParams.sfTempErrorHist,controlParams.currentIdx);
@@ -259,7 +347,7 @@ if (abs(KisfBoost)>3) KisfBoost=3*sign(KisfBoost); end;
 
 %% determine the target steady state chillplate temperature (adaptive chillplate temp)
 % weight set by (1-error)^2 with exponential decay as a function of past time
-bs=flipline(historyUnwrap(controlParams.sfTempErrorHist,controlParams.currentIdx));
+bs=flipline(historyUnwrap(controlParams.tempErrorHist,controlParams.currentIdx));
 w_factor=(max(1-abs(bs*10),0).^2).*((1-abs(bs*10)).^2).*(exp((-([0:controlParams.Nbuf-1]))/600)); % ignore points where optic error is too large
 
 bs=flipline(historyUnwrap(controlParams.chillplateHist,controlParams.currentIdx));
@@ -269,17 +357,37 @@ controlParams.adp_Kprsf=adp_Kprsf;
 %% determine the target instantaneous chillplate temperature
 % applies Kp, Kd, and Ki corrections to the steady state chillplate temp target determined above
 controlParams.setPoint=adp_Kprsf-KisfBoost-controlParams.Kpsf*sfTempError+sfTempDeriv*controlParams.Kdsf; % combined Kp Ki Kp method
+
+
+% HACK TO REMOVE DUAL LAYER CONTROL
+KisfBoost=KiBoost;
+controlParams.Kpsf=controlParams.Kp;
+controlParams.Kdsf=controlParams.Kd;
+sfTempError=tempError;
+sfTempDeriv=tempDeriv;
+controlParams.setPoint=adp_Kprsf-KisfBoost-controlParams.Kpsf*sfTempError+sfTempDeriv*controlParams.Kdsf; % combined Kp Ki Kp method
+% END HACK
+
 if (controlParams.setPoint<controlParams.minSetPoint)
     controlParams.setPoint=controlParams.minSetPoint;
 end;
-if (controlParams.setPoint>controlParams.maxSetPoint)
-    controlParams.setPoint=controlParams.maxSetPoint;
+%if (controlParams.setPoint>controlParams.maxSetPoint)  override default
+%upper limit to mitigate impact og run-away events
+
+% CA adding from naulleau email 2022.12.01
+% controlParams.setpoint is the target temperature for the subframe in the
+% dual-stage approach. The software is putting a lower limit on the subframe temp goal to be 18C.
+
+if (controlParams.setPoint>18) 
+    disp('Possible problem with temp reading, do not change setpoint and limit setpoint to 18c');
+    controlParams.setPoint=min(controlParams.setPointHist(previousIdx),18);
+    controlParams.setPoint=controlParams.maxSetPoint-4;
 end;
 controlParams.setPointHist(controlParams.currentIdx)=controlParams.setPoint;
 
 %% display status in control window
 fprintf('%s ',datestr(now));
-fprintf('PO Goal=%3.1f  PO Temp=%4.3f  Subframe Goal=%3.1f  Subfram Temp=%3.1f  SubframeAdpRef=%4.2f  Chiller=%3.1f  ChillerAdpRef=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.subframeHist(controlParams.currentIdx),controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf);
+fprintf('PO Goal=%4.3f  PO Temp=%4.3f  Subframe Goal=%3.1f  Subfram Temp=%3.1f  SubframeAdpRef=%4.2f  Chiller=%3.1f  ChillerAdpRef=%4.2f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.subframeHist(controlParams.currentIdx),controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf);
 
 %% Send "I'm Alive" email
 % 	global aliveCounter;
@@ -302,22 +410,27 @@ fprintf(fid,'%s,',datestr(now));
 for i=1:10
     % write the individual channel temps
 end
-fprintf(fid,'%3.1f  %4.3f  %3.1f  %4.2f  %3.1f  %4.2f %3.1f %3.1f %3.1f %3.1f %3.1f %3.1f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.Kpsf,controlParams.Kisf,controlParams.Kdsf);
+fprintf(fid,'%4.3f  %4.3f  %3.1f  %4.2f  %3.1f  %4.2f %3.1f %3.1f %3.1f %3.1f %3.1f %3.1f\n',controlParams.tempGoal,currentTemp,controlParams.subframeSetPoint,controlParams.adp_Kpr,controlParams.setPoint,controlParams.adp_Kprsf,controlParams.Kp,controlParams.Ki,controlParams.Kd,controlParams.Kpsf,controlParams.Kisf,controlParams.Kdsf);
 fclose(fid);
 
-%% temprature control status and control GUI
+%% temperature control status and control GUI
 h=findobj(csgHandle,'Tag','ed_adp_Kpr');
 set(h,'String',num2str(adp_Kpr,'%4.2f'));
 h=findobj(csgHandle,'Tag','ed_adp_Kprsf');
 set(h,'String',num2str(adp_Kprsf,'%4.2f'));
 
 h=findobj(csgHandle,'Tag','st_sf_setpoint');
-set(h,'String',num2str(controlParams.subframeSetPoint,'%3.2f'));
+set(h,'String',num2str(controlParams.subframeSetPoint,'%4.3f'));
 h=findobj(csgHandle,'Tag','st_cp_setpoint');
-set(h,'String',num2str(controlParams.setPoint,'%3.1f'));
+set(h,'String',num2str(controlParams.setPoint,'%4.2f'));
 
 h=findobj(csgHandle,'Tag','st_ot');
 set(h,'String',num2str(currentTemp,'%5.3f'));
+if abs(currentTemp-controlParams.tempGoal)>0.01
+    set(h,'ForegroundColor',[1,0,0],'FontWeight','bold');
+else
+    set(h,'ForegroundColor',[0,1,0],'FontWeight','bold');
+end;
 h=findobj(csgHandle,'Tag','st_cp1');
 set(h,'String',num2str(data.temps(data.Nchan-3,data.currentIdx),'%4.2f'));
 h=findobj(csgHandle,'Tag','st_cp2');
@@ -341,16 +454,22 @@ set(h,'String',num2str(-KisfBoost,'%4.2f'));
 h=findobj(csgHandle,'Tag','st_kdsfg');
 set(h,'String',num2str(sfTempDeriv*controlParams.Kdsf,'%4.2f'));
 
-updateTempPlots();
-
 %% reset adaptive Kp and Ki section
 if tempError>0.1
     controlParams.Kp=KpMem;
+    controlParams.Kd=KdMem;
     controlParams.Ki=KiMem;
 end;
 if sfTempError>0.1
-    controlParams.Kpsf=KpsfMem;
-    controlParams.Kisf=KisfMem;
+    if exist('KpsfMem','var')
+        controlParams.Kpsf=KpsfMem;
+    end
+    if exist('KdsfMem','var')
+        controlParams.Kdsf=KdsfMem;
+    end
+    if exist('KisfMem','var')
+        controlParams.Kisf=KisfMem;
+    end
 end;
 %% send trouble email if problem has been detected
 % global troubleEmailSent;

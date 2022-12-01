@@ -19,6 +19,15 @@ try
         end;
     end;
     
+    %% ensure that we do not have an active measurePoint error state
+    if currentTemp.measurePointError
+        fprintf('tempSensorTimerCallback.m: Line 26\n');
+        fprintf('Not calling the control function because measurePoint showing error state.\n')
+        return;
+    end
+    
+    executionCount=get(tempSensorTimer,'TasksExecuted');
+
     %% call function to read all the temperatures
     tempSensorData = getTemps(tempSensorData,currentTemp);
 
@@ -29,11 +38,18 @@ try
 
     %% execute the control loop which will return a target temp for the chill
     %   plates through the controlParams structure
-    controlParams = tempControlLoop(tempSensorData,controlParams);
+    if executionCount<2
+        controlParams = tempControlLoop(tempSensorData,controlParams,1);
+    else
+        controlParams = tempControlLoop(tempSensorData,controlParams);
+    end;
 
     %% call function set the chill plate temps
     %disp(sprintf('Setting chillplate setpoints to %3.1f',controlParams.setPoint));
     setChillers(controlParams.setPoint);
+
+    %% call function update the control error plots
+    updateTempPlots();
 
     %% save all data and parameters to disk
     save controlParamsSave.mat controlParams

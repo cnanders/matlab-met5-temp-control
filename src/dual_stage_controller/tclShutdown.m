@@ -2,6 +2,7 @@ function tclShutdown
 
 global csgHandle    % handle to the control planel figure
 global epHandle     % handle to the error plot figureglobal tempSensorTimer  % handle to the control loop timer
+global ctpHandle     % handle to individual channel plot figure
 global tempSensorTimer  % handle to the control loop timer
 global tempReadTimer    % handle to the temperature reading timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
@@ -15,15 +16,18 @@ stop(tempSensorTimer);
 stop(tempReadTimer);
 catch
 end;
-delete(tempSensorTimer);
-delete(tempReadTimer);
 try
 stop(timerfindall);
 catch
 end;
+delete(tempSensorTimer);
+delete(tempReadTimer);
 delete(timerfindall);
-measurePoint.disconnect();
+pause(4);
 delete(csgHandle);
 delete(epHandle);
-pause(1);
+delete(ctpHandle);
+pause(4);
+measurePoint.disconnect();
+%delete(ATEC302);
 clear global

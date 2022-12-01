@@ -5,9 +5,12 @@ function tclStartup
 clear global 
 clear tempReadTimerCallback
 
+addpath C:\Users\metmatlab\Documents\MATLAB\matlab-met5-temp-control\src\dual_stage_controller
+
 %% define global variables
 global csgHandle    % handle to the control planel figure
 global epHandle     % handle to the error plot figure
+global ctpHandle     % handle to individual channel plot figure
 global tempSensorTimer  % handle to the control loop timer
 global tempReadTimer    % handle to the temperature reading timer
 global controlParams    % control parameters structure (see tempControlLoop.m for details)
@@ -21,7 +24,7 @@ global virtualMode      % global variable that allow system to be put into virtu
 virtualMode=0;
 
 %% Make sure that we only allow one instance of control loop to run
-if ~isempty(findobj(csgHandle,'Name','CONTROL PANEL'))
+if ~isempty(findobj(csgHandle,'Name','MET5 TEMPERATURE CONTROL PANEL'))
     beep;
     fprintf('TEMP SENSOR ALREADY RUNNING!!!\n');
     return;
@@ -34,60 +37,8 @@ if ~virtualMode      % enable hardware if no in vitrual mode
     %% Create MesaurPoint client
     [cDirThis, ~, ~] = fileparts(mfilename('fullpath'));
     addpath(genpath(fullfile(cDirThis, '..', '..', 'mpm-packages')));
-
-    % Initiate a MesaurPoint client
-    cIP = '192.168.20.27';
-    measurePoint = datatranslation.MeasurPoint(cIP);
-    measurePoint.connect(); % Connect the instrument through TCP/IP
-    measurePoint.idn(); % Ask the instument its id using SCPI standard queries
-    measurePoint.enable(); % Enable readout on protected channels
     
-     % Show all MeasurePoint channel hardware types (These cannot be set)
-    [tc, rtd, volt] = measurePoint.channelType();
-    fprintf('bl12014.Logger.init():\n');
-    fprintf('DataTranslation MeasurPoint Hardware configuration:\n');
-    fprintf('TC   sensor channels = %s\n',num2str(tc,'%1.0f '))
-    fprintf('RTD  sensor channels = %s\n',num2str(rtd,'%1.0f '))
-    fprintf('Volt sensor channels = %s\n',num2str(volt,'%1.0f '))
-
-    % Configure MeasurePoint to know what hardware we have connected
-    % to each channel
-    channels = 0 : 7;
-    for n = channels
-       measurePoint.setSensorType(n, 'J');
-    end
-
-    channels = 8 : 15;
-    for n = channels
-        measurePoint.setSensorType(n, 'PT1000');
-    end
-
-    channels = 16 : 19;
-    for n = channels
-        measurePoint.setSensorType(n, 'PT100');
-    end
-
-    channels = 20 : 23;
-    for n = channels
-       measurePoint.setSensorType(n, 'PT1000');
-    end
-
-    channels = 24 : 31;
-    for n = channels
-        measurePoint.setSensorType(n, 'PT100');
-    end
-
-    channels = 32 : 47;
-    for n = channels
-        measurePoint.setSensorType(n, 'V');
-    end
-
-    % Set up continuous population of internal memory buffer
-    measurePoint.setScanList(0:47);
-    measurePoint.setScanPeriod(0.1);
-    measurePoint.initiateScan();
-    % measurePoint.abortScan();
-    measurePoint.clearBytesAvailable();
+    measurePoint = init_measurePoint;
 
     %% Create ATEC302 instance for each controller
     % 1, 2, 3, 4 correspond to FTC1,2,3,4 as shown on the chassis
@@ -109,15 +60,16 @@ end;
 
 %% set the default values for the temperature reading structure
 currentTemp.avgCnt=0;  % current averaging counter
-currentTemp.avg=300;  % number of readings to average (rolling)
+currentTemp.avg=800;  % number of readings to average (rolling)
 currentTemp.Nchan=55;  % number of channels, include both real and 3 virtual channels (optic avg, chiller avg, subframe avg)
 currentTemp.buffer=zeros(currentTemp.Nchan,currentTemp.avg);
 currentTemp.avgTemps=zeros(currentTemp.Nchan,1);
+currentTemp.measurePointError=0;
 
 %% set the default values for control structure
 tempSensorData.Nbuf=2688;
 tempSensorData.Nchan=currentTemp.Nchan;
-tempSensorData.Labels={'Avg Optic Temp','Avg Chill Plate Temp','c1','c2','c3','c4','c5','c6','c7','c8','c9','c10','c11','c12','c13','c14','c15','c16','c17','c18','c19','c20'};
+tempSensorData.Labels=getTempSensorLabels;
 tempSensorData.temps=zeros(tempSensorData.Nchan,tempSensorData.Nbuf);
 tempSensorData.currentIdx=0;
 
@@ -141,14 +93,14 @@ controlParams.chillPlateTemp=12;
 controlParams.setPoint=12;
 controlParams.adp_Kprsf=12;
 controlParams.maxSetPoint=28;
-controlParams.minSetPoint=10;
-controlParams.setPointHist=ones(1,2688)*18;
-controlParams.chillplateHist=ones(1,2688)*12;
-controlParams.subframeHist=ones(1,2688)*22.5;
-controlParams.tempErrorHist=zeros(1,2688);
-controlParams.tempDerivHist=zeros(1,2688);
-controlParams.sfTempErrorHist=zeros(1,2688);
-controlParams.sfTempDerivHist=zeros(1,2688);
+controlParams.minSetPoint=8;
+controlParams.setPointHist=ones(1,tempSensorData.Nbuf)*18;
+controlParams.chillplateHist=ones(1,tempSensorData.Nbuf)*12;
+controlParams.subframeHist=ones(1,tempSensorData.Nbuf)*22.5;
+controlParams.tempErrorHist=zeros(1,tempSensorData.Nbuf);
+controlParams.tempDerivHist=zeros(1,tempSensorData.Nbuf);
+controlParams.sfTempErrorHist=zeros(1,tempSensorData.Nbuf);
+controlParams.sfTempDerivHist=zeros(1,tempSensorData.Nbuf);
 
 %% load the last save data
 try
@@ -162,11 +114,14 @@ end;
 
 %% Setup the figures
 csgHandle=openfig('CoolStateGUI.fig','reuse');
+set(csgHandle,'Name','MET5 TEMPERATURE CONTROL PANEL');
 %tpHandle=SensorPlot;
 
 % initialize ErrorPlot
 epHandle=openfig('CoolStatePlots.fig','reuse');
-%epHandle=figure('Name','CONTROL ERROR PANEL','NumberTitle','off','CloseRequestFcn','tclShutdown');
+set(epHandle,'Name','MET5 TEMPERATURE LOG');
+%epHandle=figure('Name','MET5 TEMPERATURE LOG','NumberTitle','off','CloseRequestFcn','tclShutdown');
+ctpHandle=openfig('ChannelPlots.fig','reuse');
 
 % initialize the control panel
 h=findobj(csgHandle,'Tag','ed_T');
@@ -186,7 +141,7 @@ set(h,'String',num2str(controlParams.Kdsf,'%4.2f'));
 h=findobj(csgHandle,'Tag','ed_kdT');
 set(h,'String',num2str(controlParams.KdT,'%4.2f'));
 h=findobj(csgHandle,'Tag','ed_set_target');
-set(h,'String',num2str(controlParams.tempGoal,'%4.2f'));
+set(h,'String',num2str(controlParams.tempGoal,'%5.3f'));
 h=findobj(csgHandle,'Tag','ed_set_arr');
 set(h,'String',num2str(controlParams.adp_Kpr,'%4.2f'));
 h=findobj(csgHandle,'Tag','ed_set_chiller');
@@ -211,11 +166,17 @@ set(h,'String',num2str(0,'%4.2f'));
 %global tempdatabase
 %tempdatabase=csvread('templog.csv');
 
+%% initialize plot windows
+updateTempPlots;
+
 %% setup the recurring temperature reading timer
-tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','FixedRate','Period', 1, 'TimerFcn', 'tempReadTimerCallback'); 
+tempReadTimer = timer('Name', 'tempReadTimer', 'ExecutionMode','fixedSpacing','Period', 0.5, 'TimerFcn', 'tempReadTimerCallback'); 
 start(tempReadTimer);
 
 %% setup the recurring control timer
 % dont forget to change the timer delay time multiplier from 6 back to 60, this is for debug mode
-tempSensorTimer = timer('Name', 'tempSensorTimer', 'ExecutionMode','FixedRate','Period', controlParams.T*60, 'TimerFcn', 'tempSensorTimerCallback'); 
-start(tempSensorTimer);
+tempSensorTimer = timer('Name', 'tempSensorTimer', 'ExecutionMode','FixedRate','Period', controlParams.T*60,'StartDelay', 2, 'TimerFcn', 'tempSensorTimerCallback'); 
+if ~strcmp(get(tempSensorTimer,'running'),'on')  % may have been started already by the tempReadTimer callback
+	start(tempSensorTimer);
+end;
+

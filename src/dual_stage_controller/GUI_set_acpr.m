@@ -2,6 +2,7 @@ function GUI_set_acpr
 
 global controlParams
 global csgHandle
+global tempSensorData   % temperature data structure (see tempControlLoop.m for details)
 
 s=get(gcbo,'String');
 v=str2num(s);
@@ -16,4 +17,5 @@ controlParams.sfTempDerivHist = controlParams.sfTempDerivHist*0;
 controlParams.chillplateHist = controlParams.chillplateHist*0+v;
 
 %% call the control loop
-tempSensorTimerCallback;
+    controlParams = tempControlLoop(tempSensorData,controlParams,1); % do not add to control error history
+    setChillers(controlParams.setPoint);
